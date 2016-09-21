@@ -62,6 +62,8 @@ class kwc_usgs {
 		add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_scripts' ) );
 
 		add_shortcode( "USGS", array( $this, 'USGS' ) );
+		add_shortcode( "usgs_custom", array( $this, 'usgs_custom' ) );
+		add_shortcode( "nws_custom", array( $this, 'nws_custom' ) );
 
 
 		/* Define custom functionality.
@@ -312,8 +314,8 @@ class kwc_usgs {
 			$xml_tree = simplexml_load_string( $data );
 			if ( False === $xml_tree ) {
 				return 'Unable to parse USGS\'s XML';
-			}
-
+			}		
+			
 			if ( ! isset( $title )  ) {
 				$SiteName = $xml_tree->timeSeries->sourceInfo->siteName;
 			} else {
@@ -381,5 +383,278 @@ class kwc_usgs {
 		}
 		return $thePage;
 	}
+	
+	/**
+	 * Custom USGS stats for multiple (100 max) locations and/or (100 max) parameters and/or date_range and/or order
+	 *
+	 * Date Range in yyyy-mm-dd,yyyy-mm-dd or previous,number,hh::mm (24hr)
+	 * (last x days before today at a certain time (optional, otherwise all times are shown)) 
+	 *
+	 * Order only makes sense with date range, and takes two options asc (default) or desc (or anything else).
+	 *
+	 * No styling:  <div class="site parameter" datetime="timestamp">value</div>
+	 * Automatically converts C to F for 00010
+	 * attribute datetime value is in javascript format
+	 *
+	 */	
+	
+	public function usgs_custom( $atts, $content = null ) {
+		extract( shortcode_atts(
+				array(
+					'location'  => '03071590,03071600,03071605',
+					'parameters' => '00010,00045,00065,00095,00300,00400,62614',
+					'date_range' => null,
+					'order' => 'asc'
+				), $atts ) );
+
+		$thePage = get_transient( 'usgs_custom-' . $location . $date_range . $parameters . $order );
+
+		if ( !$thePage ) {	
+		
+			$date_ranges = explode(',',$date_range);
+			$hour_minutes = false;
+			$value_order = [];
+		
+			if ($date_ranges[0] === 'previous') {
+				
+				if(!$date_ranges[1] || !is_numeric($date_ranges[1]) ) {
+					return "Second argument to date_range must be a number.\n";
+				}
+				// find todays date, and find the previous day ranges
+				$today = strtotime(date('Y-m-d'));
+				$startdt = date('Y-m-d',strtotime("-" . $date_ranges[1] . " day", $today));
+				$enddt = date('Y-m-d',strtotime("-1 day", $today));
+				
+				if ( $date_ranges[2] ) {
+					$hour_minutes = $date_ranges[2];				
+				}					
+										
+			}	
+			
+			if($date_ranges[0] === 'previous') {
+				$url = "http://waterservices.usgs.gov/nwis/iv?site=$location&parameterCd=$parameters&startDT=$startdt&endDT=$enddt&format=waterml";
+			} else {
+				$url = "http://waterservices.usgs.gov/nwis/iv?site=$location&parameterCd=$parameters&format=waterml";
+			}
+				
+			$response = wp_remote_get( $url );
+			$data = wp_remote_retrieve_body( $response );
+
+			if ( ! $data ) {
+				return 'NWS Not Responding.';
+			}
+
+			$data = str_replace( 'ns1:', '', $data );
+
+			$xml_tree = simplexml_load_string( $data );
+			if ( False === $xml_tree ) {
+				return 'Unable to parse NWS XML';
+			}
+			//PC::debug($xml_tree);		
+								
+			foreach ( $xml_tree->timeSeries as $site_data ) {
+				if ( $site_data->values->value == '' ) {
+					$value = '-';
+				} else if ( $site_data->values->value == -999999 ) {
+						$value = 'UNKNOWN';
+						$provisional = '-';
+				} else {
+					
+					// space to underscore; all lower case
+					$SiteName = $site_data->sourceInfo->siteName;
+					$SiteName = preg_replace('/[^A-Za-z0-9_]/', '', strtolower(preg_replace('/\s+/', '_', $SiteName)));
+					
+					$description = explode(',', $site_data->variable->variableDescription);
+					$description = strtolower(preg_replace('/\s+/', '_', $description[0]));
+
+					$name = $site_data->variable->variableName;		
+					
+					switch ( $site_data->variable->variableCode ) {
+					case "00010":
+						$watertempdesc  = "&deg;F";
+						
+						foreach ($site_data->values->value as $value) {
+							$datetime = strtotime($value->attributes()->dateTime) * 1000;
+							$watertemp   = ( 9 / 5 ) * (float)$value + 32;
+							if($hour_minutes) {
+								$value_hour_minutes = date('H:i',$datetime / 1000);
+								if($hour_minutes === $value_hour_minutes) {
+									$value_order[] = "<div class='" . $SiteName . "  " . $description . "' datetime='" . $datetime . 
+													"'>$watertemp $watertempdesc</div>";
+								}
+							} else {	
+									$value_order[] = "<div class='" . $SiteName . "  " . $description . "' datetime='" . $datetime . 
+													"'>$watertemp $watertempdesc</div>";
+							}					
+						}
+						break;
+						
+					default:
+						$splitDesc = explode( ",", $name );
+						$defaultdesc = end($splitDesc);
+						
+						foreach ($site_data->values->value as $value) {
+							$datetime = strtotime($value->attributes()->dateTime) * 1000;
+							if($hour_minutes) {
+								$value_hour_minutes = date('H:i',$datetime / 1000);
+								if($hour_minutes === $value_hour_minutes) {
+									$value_order[] = "<div class='" . $SiteName . " " . $description . "' datetime='" . $datetime . 
+													"'>$value $defaultdesc</div>";
+								}
+							} else {
+								$value_order[] = "<div class='" . $SiteName . " " . $description . "' datetime='" . $datetime . 
+												"'>$value $defaultdesc</div>";
+							}
+						}
+							
+					} // end switch
+					
+				}  // end else
+			}  // foreach xml_tree
+			
+			// Put it all together here
+			$thePage = "<div class='usgs_custom'>";
+						
+			if($value_order && $value_order !== 'asc') {
+				$value_order = array_reverse($value_order);
+				$thePage .= implode('',$value_order);
+				$thePage .= "</div>";
+			} else {
+				$thePage .= implode('',$value_order);
+				$thePage .= "</div>";			
+			}
+
+			set_transient( 'usgs_custom-' . $location . $date_range . $parameters, $thePage . $order, 60 * 15 );
+		} // end found no transient
+				
+		return $thePage;
+	}	
+
+	/**
+	 * Custom NWS stats for multiple locations and multiple attributes (ft_msl, stage, flow) 
+	 * from zerodatum and observed (primary,secondary)
+	 * Schema: http://weather.gov/ohd/hydroxc/schemas/hydrogen/HydroGenData.xsd
+	 * No styling:  <div class="site">value</div>
+	 * Automatically converts C to F
+	 * Stores datetime (valid) in javascript format
+	 *
+	 */	
+
+	public function nws_custom( $atts, $content = null ) {
+		extract( shortcode_atts(
+				array(
+					'location'  => 'pmaw2,llpw2,lldp1',
+					'parameters' => null,
+					'title'  => null,
+					'graph'  => null
+				), $atts ) );
+
+			$locations = explode(',', $location);
+
+			foreach ($locations as $location) {
+
+				//$thePage = get_transient( 'nws_custom-' . $location . $parameters . $graph . $title );
+	
+				//if ( !$thePage ) {
+				$url = "http://water.weather.gov/ahps2/hydrograph_to_xml.php?gage=$location&output=xml";
+	
+				$response = wp_remote_get( $url );
+				$data = wp_remote_retrieve_body( $response );
+	
+				if ( ! $data ) {
+					return 'NWS Not Responding.';
+				}
+	
+				$data = str_replace( 'ns1:', '', $data );
+	
+				$xml_tree = simplexml_load_string( $data );
+				if ( False === $xml_tree ) {
+					return 'Unable to parse NWS XML';
+				}
+				PC::debug($xml_tree);		
+	
+				$thePage = "<div class='nws_custom'>";
+									
+				$graphflow = "";
+				$graphgage = "";
+				foreach ( $xml_tree->timeSeries as $site_data ) {
+					if ( $site_data->values->value == '' ) {
+						$value = '-';
+					} else if ( $site_data->values->value == -999999 ) {
+							$value = 'UNKNOWN';
+							$provisional = '-';
+					} else {
+						
+						// space to underscore; all lower case; only special character allowed is underscored
+						$SiteName = $site_data->sourceInfo->siteName;
+						$SiteName = preg_replace('/[^A-Za-z0-9_]/', '', strtolower(preg_replace('/\s+/', '_', $SiteName)));
+						
+						$description = explode(',', $site_data->variable->variableDescription);
+						$description = strtolower(preg_replace('/\s+/', '_', $description[0]));
+	
+						$name = $site_data->variable->variableName;
+						
+						$site_data->values->attributes();
+						
+						// in javascript this works out of the box (* 1000); in php add . "UTC"
+						$datetime = strtotime($site_data->values->value->attributes()->dateTime) * 1000;
+						
+						switch ( $site_data->variable->variableCode ) {
+						case "00010":
+							$value  = $site_data->values->value;
+							$degf   = ( 9 / 5 ) * (float)$value + 32;
+							$watertemp      = $degf;
+							$watertempdesc  = "&deg;F";
+							$thePage .= "<div class='" . $SiteName . "  " . $description . "' datetime='" . $datetime . 
+											"'>$watertemp $watertempdesc</div>";
+							break;
+	
+						case "00060":
+							$splitDesc = explode( ",", $name );
+							$value  = $site_data->values->value;
+							$streamflow     = $value;
+							$streamflowdesc = $splitDesc[1];
+							$thePage .= "<div class='" . $SiteName . " " . $description . "' datetime='" . $datetime . 
+											"'>$streamflow $streamflowdesc</div>";
+							$graphflow = "<img src='http://waterdata.usgs.gov/nwisweb/graph?site_no=$location&parm_cd=00060" . "&" . rand() . "'/>";
+							break;
+	
+						case "00065":
+							$splitDesc = explode( ",", $name );
+							$value  = $site_data->values->value;
+							$gageheight = $value;
+							$gageheightdesc = $splitDesc[1];
+							$thePage .= "<div class='" . $SiteName . " " . $description . "' datetime='" . $datetime . 
+											"'>$gageheight $gageheightdesc</div>";
+							$graphgage = "<img src='http://waterdata.usgs.gov/nwisweb/graph?site_no=$location&parm_cd=00065" . "&" . rand() . "'/>";
+							break;
+							
+						default:
+							$splitDesc = explode( ",", $name );
+							$value  = $site_data->values->value;
+							$defaultvalue = $value;
+							$defaultdesc = end($splitDesc);
+							$thePage .= "<div class='" . $SiteName . " " . $description . "' datetime='" . $datetime . 
+											"'>$defaultvalue $defaultdesc</div>";
+								
+						}
+						
+					}
+				}
+	
+				if ( isset( $graph ) ) {
+					if ( $graph == 'show' ) {
+						$thePage .= "<div class='clearfix'>";
+						$thePage .= $graphgage . $graphflow;
+						$thePage .= "</div>";
+					}
+				}
+				$thePage .= "</div>";
+			} // foreach location		
+			//set_transient( 'nws_custom-' . $location . $parameters . $graph . $title, $thePage, 60 * 15 );
+			//}
+			return $thePage;
+	}	
+
 
 }
