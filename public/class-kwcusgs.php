@@ -469,45 +469,34 @@ class kwc_usgs {
 
 					$name = $site_data->variable->variableName;		
 					
-					switch ( $site_data->variable->variableCode ) {
-					case "00010":
-						$watertempdesc  = "&deg;F";
+					if((string)$site_data->variable->variableCode === '00010') {
+						$temperature = true;	
+					} else {
+						$temperature = false;
+					}
+											
+					$splitDesc = explode( ",", $name );
+					$defaultdesc = end($splitDesc);
+					
+					foreach ($site_data->values->value as $value) {
+	
+						$datetime = strtotime($value->attributes()->dateTime) * 1000;
+						if($temperature) {
+							$value   = ( 9 / 5 ) * (float)$value + 32;
+							$defaultdesc  = "&deg;F";
+						}							
 						
-						foreach ($site_data->values->value as $value) {
-							$datetime = strtotime($value->attributes()->dateTime) * 1000;
-							$watertemp   = ( 9 / 5 ) * (float)$value + 32;
-							if($hour_minutes) {
-								$value_hour_minutes = date('H:i',$datetime / 1000);
-								if($hour_minutes === $value_hour_minutes) {
-									$value_order[] = "<div class='" . $SiteName . "  " . $description . "' datetime='" . $datetime . 
-													"'>$watertemp $watertempdesc</div>";
-								}
-							} else {	
-									$value_order[] = "<div class='" . $SiteName . "  " . $description . "' datetime='" . $datetime . 
-													"'>$watertemp $watertempdesc</div>";
-							}					
-						}
-						break;
-						
-					default:
-						$splitDesc = explode( ",", $name );
-						$defaultdesc = end($splitDesc);
-						
-						foreach ($site_data->values->value as $value) {
-							$datetime = strtotime($value->attributes()->dateTime) * 1000;
-							if($hour_minutes) {
-								$value_hour_minutes = date('H:i',$datetime / 1000);
-								if($hour_minutes === $value_hour_minutes) {
-									$value_order[] = "<div class='" . $SiteName . " " . $description . "' datetime='" . $datetime . 
-													"'>$value $defaultdesc</div>";
-								}
-							} else {
+						if($hour_minutes) {
+							$value_hour_minutes = date('H:i',$datetime / 1000);
+							if($hour_minutes === $value_hour_minutes) {
 								$value_order[] = "<div class='" . $SiteName . " " . $description . "' datetime='" . $datetime . 
 												"'>$value $defaultdesc</div>";
 							}
+						} else {
+							$value_order[] = "<div class='" . $SiteName . " " . $description . "' datetime='" . $datetime . 
+											"'>$value $defaultdesc</div>";
 						}
-							
-					} // end switch
+					}
 					
 				}  // end else
 			}  // foreach xml_tree
