@@ -70,7 +70,7 @@ class kwc_usgs {
 		 * Refer To http://codex.wordpress.org/Plugin_API#Hooks.2C_Actions_and_Filters
 		 */
 		//  add_action( '@TODO', array( $this, 'action_method_name' ) );
-		//  add_filter( '@TODO', array( $this, 'filter_method_name' ) );
+		//  add_filter( '@TODO', array( $this, 'filter_method_name' ) );;	
 
 	}
 
@@ -385,12 +385,14 @@ class kwc_usgs {
 	}
 	
 	/**
-	 * Custom USGS stats for multiple (100 max) locations and/or (100 max) parameters and/or date_range and/or order
+	 * Custom USGS stats for multiple (100 max) locations [location] and/or (100 max) parameters [parameters] and/or date_range and/or order
 	 *
-	 * Date Range in yyyy-mm-dd,yyyy-mm-dd or previous,number,hh::mm (24hr)
+	 *	[name] Provide a custom classname for enclosing div
+	 *
+	 * [date_range] Date Range in yyyy-mm-dd,yyyy-mm-dd or previous,number,hh::mm (24hr)
 	 * (last x days before today at a certain time (optional, otherwise all times are shown)) 
 	 *
-	 * Order only makes sense with date range, and takes two options asc (default) or desc (or anything else).
+	 * [order] Order only makes sense with date range, and takes two options asc (default) or desc (or anything else).
 	 *
 	 * No styling:  <div class="site parameter" datetime="timestamp">value</div>
 	 * Automatically converts C to F for 00010
@@ -401,13 +403,14 @@ class kwc_usgs {
 	public function usgs_custom( $atts, $content = null ) {
 		extract( shortcode_atts(
 				array(
+					'name' => 'usgs_custom',
 					'location'  => '03071590,03071600,03071605',
 					'parameters' => '00010,00045,00065,00095,00300,00400,62614',
 					'date_range' => null,
 					'order' => 'asc'
 				), $atts ) );
 
-		$thePage = get_transient( 'usgs_custom-' . $location . $date_range . $parameters . $order );
+		$thePage = get_transient( 'usgs_custom-' . $name . $location . $date_range . $parameters . $order );
 
 		if ( !$thePage ) {	
 		
@@ -467,7 +470,7 @@ class kwc_usgs {
 					$description = explode(',', $site_data->variable->variableDescription);
 					$description = strtolower(preg_replace('/\s+/', '_', $description[0]));
 
-					$name = $site_data->variable->variableName;		
+					$variable_name = $site_data->variable->variableName;		
 					
 					if((string)$site_data->variable->variableCode === '00010') {
 						$temperature = true;	
@@ -475,7 +478,7 @@ class kwc_usgs {
 						$temperature = false;
 					}
 											
-					$splitDesc = explode( ",", $name );
+					$splitDesc = explode( ",", $variable_name );
 					$defaultdesc = end($splitDesc);
 					
 					foreach ($site_data->values->value as $value) {
@@ -496,13 +499,13 @@ class kwc_usgs {
 							$value_order[] = "<div class='" . $SiteName . " " . $description . "' datetime='" . $datetime . 
 											"'>$value $defaultdesc</div>";
 						}
-					}
+					} // foreach value loop
 					
 				}  // end else
-			}  // foreach xml_tree
+			}  // foreach xml_tree as site data
 			
-			// Put it all together here
-			$thePage = "<div class='usgs_custom'>";
+			// Putting it all together
+			$thePage = "<div class='" . $name . "'>";
 						
 			if($value_order && $value_order !== 'asc') {
 				$value_order = array_reverse($value_order);
@@ -512,9 +515,13 @@ class kwc_usgs {
 				$thePage .= implode('',$value_order);
 				$thePage .= "</div>";			
 			}
+			
 
-			set_transient( 'usgs_custom-' . $location . $date_range . $parameters, $thePage . $order, 60 * 15 );
+			set_transient( 'usgs_custom-' . $name . $location . $date_range . $parameters, $thePage . $order, 60 * 15 );
 		} // end found no transient
+
+		// Add a custom hook
+		$thePage = apply_filters('theme_the_water_page', $thePage);
 				
 		return $thePage;
 	}	
@@ -528,7 +535,7 @@ class kwc_usgs {
 	 * Stores datetime (valid) in javascript format
 	 *
 	 */	
-
+	 
 	public function nws_custom( $atts, $content = null ) {
 		extract( shortcode_atts(
 				array(
@@ -647,3 +654,4 @@ class kwc_usgs {
 
 
 }
+
