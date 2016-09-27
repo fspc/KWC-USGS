@@ -65,7 +65,6 @@ class kwc_usgs {
 		add_shortcode( "usgs_custom", array( $this, 'usgs_custom' ) );
 		add_shortcode( "nws_custom", array( $this, 'nws_custom' ) );
 
-
 		/* Define custom functionality.
 		 * Refer To http://codex.wordpress.org/Plugin_API#Hooks.2C_Actions_and_Filters
 		 */
@@ -507,7 +506,7 @@ class kwc_usgs {
 			// Putting it all together
 			$thePage = "<div class='" . $name . "'>";
 						
-			if($value_order && $value_order !== 'asc') {
+			if($value_order && $order !== 'asc') {
 				$value_order = array_reverse($value_order);
 				$thePage .= implode('',$value_order);
 				$thePage .= "</div>";
@@ -517,11 +516,11 @@ class kwc_usgs {
 			}
 			
 
-			set_transient( 'usgs_custom-' . $name . $location . $date_range . $parameters, $thePage . $order, 60 * 15 );
+			set_transient( 'usgs_custom-' . $name . $location . $date_range . $parameters . $order, $thePage, 60 * 5 );
 		} // end found no transient
 
 		// Add a custom hook
-		$thePage = apply_filters('theme_the_water_page', $thePage);
+		$thePage = apply_filters('water_the_theme', $thePage);
 				
 		return $thePage;
 	}	
@@ -539,20 +538,23 @@ class kwc_usgs {
 	public function nws_custom( $atts, $content = null ) {
 		extract( shortcode_atts(
 				array(
+					'name' => 'nws_custom',
 					'location'  => 'pmaw2,llpw2,lldp1',
 					'parameters' => null,
-					'title'  => null,
-					'graph'  => null
+					'date_range' => 'current',
+					'order' => 'asc'
 				), $atts ) );
 
 			$locations = explode(',', $location);
 
 			foreach ($locations as $location) {
 
-				//$thePage = get_transient( 'nws_custom-' . $location . $parameters . $graph . $title );
+				$thePage = get_transient('nws_custom-' . $name . $location . $date_range . $parameters . $order );
 	
-				//if ( !$thePage ) {
+				if ( !$thePage ) {
+				
 				$url = "http://water.weather.gov/ahps2/hydrograph_to_xml.php?gage=$location&output=xml";
+
 	
 				$response = wp_remote_get( $url );
 				$data = wp_remote_retrieve_body( $response );
@@ -560,95 +562,54 @@ class kwc_usgs {
 				if ( ! $data ) {
 					return 'NWS Not Responding.';
 				}
-	
-				$data = str_replace( 'ns1:', '', $data );
+
 	
 				$xml_tree = simplexml_load_string( $data );
 				if ( False === $xml_tree ) {
 					return 'Unable to parse NWS XML';
 				}
-				PC::debug($xml_tree);		
-	
-				$thePage = "<div class='nws_custom'>";
-									
-				$graphflow = "";
-				$graphgage = "";
-				foreach ( $xml_tree->timeSeries as $site_data ) {
-					if ( $site_data->values->value == '' ) {
-						$value = '-';
-					} else if ( $site_data->values->value == -999999 ) {
-							$value = 'UNKNOWN';
-							$provisional = '-';
+				
+				// space to underscore; all lower case; only special character allowed is underscored
+				$SiteName = (string)$xml_tree->attributes()->name;	
+				$SiteName = preg_replace('/[^A-Za-z0-9_]/', '', strtolower(preg_replace('/\s+/', '_', $SiteName)));
+			
+				$thePage = "<div class='$name'>";
+
+				$waterlevel = (string)$xml_tree->zerodatum;								
+						
+				$c = 0;			
+				foreach ( $xml_tree->observed->datum as $datum ) {
+						
+					// in javascript this works out of the box (* 1000)
+					$datetime = strtotime($datum->valid) * 1000;
+					$gageheight = $datum->primary;
+					$waterflow = (string)$datum->secondary;
+					
+					if ($waterflow === '-999' || $waterflow === 0) {
+						$waterflow = '0 cfs';						
 					} else {
-						
-						// space to underscore; all lower case; only special character allowed is underscored
-						$SiteName = $site_data->sourceInfo->siteName;
-						$SiteName = preg_replace('/[^A-Za-z0-9_]/', '', strtolower(preg_replace('/\s+/', '_', $SiteName)));
-						
-						$description = explode(',', $site_data->variable->variableDescription);
-						$description = strtolower(preg_replace('/\s+/', '_', $description[0]));
-	
-						$name = $site_data->variable->variableName;
-						
-						$site_data->values->attributes();
-						
-						// in javascript this works out of the box (* 1000); in php add . "UTC"
-						$datetime = strtotime($site_data->values->value->attributes()->dateTime) * 1000;
-						
-						switch ( $site_data->variable->variableCode ) {
-						case "00010":
-							$value  = $site_data->values->value;
-							$degf   = ( 9 / 5 ) * (float)$value + 32;
-							$watertemp      = $degf;
-							$watertempdesc  = "&deg;F";
-							$thePage .= "<div class='" . $SiteName . "  " . $description . "' datetime='" . $datetime . 
-											"'>$watertemp $watertempdesc</div>";
-							break;
-	
-						case "00060":
-							$splitDesc = explode( ",", $name );
-							$value  = $site_data->values->value;
-							$streamflow     = $value;
-							$streamflowdesc = $splitDesc[1];
-							$thePage .= "<div class='" . $SiteName . " " . $description . "' datetime='" . $datetime . 
-											"'>$streamflow $streamflowdesc</div>";
-							$graphflow = "<img src='http://waterdata.usgs.gov/nwisweb/graph?site_no=$location&parm_cd=00060" . "&" . rand() . "'/>";
-							break;
-	
-						case "00065":
-							$splitDesc = explode( ",", $name );
-							$value  = $site_data->values->value;
-							$gageheight = $value;
-							$gageheightdesc = $splitDesc[1];
-							$thePage .= "<div class='" . $SiteName . " " . $description . "' datetime='" . $datetime . 
-											"'>$gageheight $gageheightdesc</div>";
-							$graphgage = "<img src='http://waterdata.usgs.gov/nwisweb/graph?site_no=$location&parm_cd=00065" . "&" . rand() . "'/>";
-							break;
+						$waterflow = $waterflow * 1000;	
+						$waterflow = $waterflow . " cfs";					
+					}
 							
-						default:
-							$splitDesc = explode( ",", $name );
-							$value  = $site_data->values->value;
-							$defaultvalue = $value;
-							$defaultdesc = end($splitDesc);
-							$thePage .= "<div class='" . $SiteName . " " . $description . "' datetime='" . $datetime . 
-											"'>$defaultvalue $defaultdesc</div>";
-								
-						}
+					
+					if($c === 0 && $date_range === 'current') {
+						$thePage .= "<div class='$SiteName' datetime='$datetime' waterlevel='$waterlevel' gageheight='$gageheight'>$waterflow</div>";
+						break;			
+					} else {
+						$thePage .= "<div class='$SiteName' datetime='$datetime' gageheight='$gageheight'>$waterflow</div>";					
+					}				
+					$c++;			
 						
-					}
-				}
-	
-				if ( isset( $graph ) ) {
-					if ( $graph == 'show' ) {
-						$thePage .= "<div class='clearfix'>";
-						$thePage .= $graphgage . $graphflow;
-						$thePage .= "</div>";
-					}
-				}
-				$thePage .= "</div>";
-			} // foreach location		
-			//set_transient( 'nws_custom-' . $location . $parameters . $graph . $title, $thePage, 60 * 15 );
-			//}
+				} // foreach xml_tree as site data		
+				
+			} // foreach NWS location		
+
+			$thePage .= "</div>";
+
+			set_transient( 'nws_custom-' . $name . $location . $date_range . $parameters . $order, $thePage, 60 * 15 );
+			}
+
 			return $thePage;
 	}	
 
