@@ -443,14 +443,14 @@ class kwc_usgs {
 			$data = wp_remote_retrieve_body( $response );
 
 			if ( ! $data ) {
-				return 'NWS Not Responding.';
+				return 'United States Geological Survey not Responding.';
 			}
 
 			$data = str_replace( 'ns1:', '', $data );
 
 			$xml_tree = simplexml_load_string( $data );
 			if ( False === $xml_tree ) {
-				return 'Unable to parse NWS XML';
+				return 'Unable to parse United States Geological Survey XML';
 			}
 			//PC::debug($xml_tree);		
 								
