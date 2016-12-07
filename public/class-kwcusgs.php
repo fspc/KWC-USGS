@@ -454,9 +454,25 @@ class kwc_usgs {
 			}
 			//PC::debug($xml_tree);		
 								
-			foreach ( $xml_tree->timeSeries as $site_data ) {
+			foreach ( $xml_tree->timeSeries as $site_data ) {						
+						
 				if ( $site_data->values->value == '' ) {
 					$value = '-';
+					
+					// Create false data if a site is down for the season, or for some other unknown reason
+					
+					$SiteName = $site_data->sourceInfo->siteName;
+					$SiteName = preg_replace('/[^A-Za-z0-9_]/', '', strtolower(preg_replace('/\s+/', '_', $SiteName)));
+					
+					$description = explode(',', $site_data->variable->variableDescription);
+					$description = strtolower(preg_replace('/\s+/', '_', $description[0]));
+					
+					if($hour_minutes) {
+						for ($x = 0; $x < $date_ranges[1]; $x++) {
+							$value_order[] = "<div class='" . $SiteName . " " . $description . "' datetime='n/a'>n/a</div>";
+						}
+					}				
+						
 				} else if ( $site_data->values->value == -999999 ) {
 						$value = 'UNKNOWN';
 						$provisional = '-';
